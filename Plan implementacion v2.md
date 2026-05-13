@@ -1,254 +1,468 @@
-# 📘 Plan Técnico de Implementación Profesional - "PChop"
-**E-commerce Multiplataforma (Android, iOS, Web, Windows) | Flutter + Firebase + Provider**
+## Prompt
+Actúa como un Arquitecto de Software Senior. Genera un Plan de Implementación detallado en formato Markdown para el proyecto "PChop", una tienda de electrónicos multiplataforma (Android, iOS, Web, Windows).
 
----
+### 1. Requisitos Técnicos y Restricciones
 
-## 🎯 Propósito y Alcance Técnico
-Desarrollar una aplicación de comercio electrónico para venta de electrónicos (computadoras, teléfonos, periféricos) con arquitectura escalable, estado local sincronizado con Firestore, navegación adaptativa por plataforma, y un sistema de diseño basado en tonos pastel con el morado claro como identidad principal. El plan establece la secuencia técnica exacta, el mapeo de bases de datos, la estructura del proyecto y los estándares de calidad antes de la generación de código.
+Framework: Flutter (Dart).
 
----
+Backend: Firebase Console (Edición Standard) en modo de prueba.
 
-## 🛠️ Ecosistema de Desarrollo
+Base de Datos y Auth: Cloud Firestore y Autenticación por correo/password.
 
-| Herramienta | Rol en el Flujo de Trabajo |
-|-------------|----------------------------|
-| **VS Code** | Entorno principal de compilación, depuración, testing, control de versiones y análisis estático. |
-| **Antigravity** | Entorno asistido por IA para generación de scaffolding, validación de arquitectura, refactorización guiada y prototipado rápido de widgets/providers. Se usa en paralelo a VS Code para acelerar la escritura de patrones repetitivos. |
-| **Firebase Console** | Auth (Email/Password), Firestore (BD NoSQL), Storage (imágenes), Hosting (Web), Crashlytics, Analytics. |
-| **Flutter SDK** | Canal `stable`. Soporte habilitado para `android`, `ios`, `web`, `windows`. |
-| **Git + CI/CD** | Repositorio centralizado. Pipeline opcional para builds multiplataforma y despliegue web. |
+Gestión de Estado: Provider.
 
----
+PROHIBICIÓN: No utilizar Google Analytics ni ninguna telemetría, ni en desarrollo ni en producción.
 
-## 🗄️ Estrategia de Mapeo de Datos (Relacional → Firestore)
+### 2. Estructura de Archivos
+Define la organización de carpetas dentro de 'lib/'. Además, detalla qué contenido debe ir en la carpeta 'bin/' (scripts de carga de datos o tareas administrativas de servidor) para este proyecto.
 
-El esquema proporcionado es relacional. Firestore es documental; por tanto, se aplicará **denormalización controlada**, **subcolecciones** y **snapshots inmutables** para garantizar rendimiento en lecturas y consistencia en transacciones.
+### 3. Diseño Visual (Estética Pastel)
+Establece una interfaz basada en colores pasteles, con el Morado como color principal. Debes entregar una tabla con los códigos HEX para:
 
-| Tabla Relacional | Estructura en Firestore | Estrategia Técnica |
-|------------------|-------------------------|--------------------|
-| `CLIENTE` | `users/{uid}` | Documento raíz vinculado a Firebase Auth. Campos: `nombre`, `apellido`, `email`, `telefono`, `estado`, `fechaRegistro`, `ultimoLogin`. |
-| `DIRECCION` | `users/{uid}/addresses/{addressId}` | Subcolección. Cada doc representa una dirección. Campo `esPredeterminada` como booleano. Se copia como snapshot en `orders` al confirmar compra. |
-| `PRODUCTO` | `products/{productId}` | Documento principal. Incluye `categoriaNombre`, `marcaNombre` (denormalizados para evitar joins). Campos de precio, stock, estado, fechas. |
-| `CATEGORIA` / `MARCA` | `categories/{catId}` / `brands/{brandId}` | Colecciones de referencia. Se usan para filtros y dropdowns. No se anidan en productos para evitar duplicación masiva. |
-| `IMAGEN_PRODUCTO` | `products/{productId}/images/{imageId}` **o** Array `imageUrls[]` en doc principal | Se recomienda array de URLs con metadatos `orden` y `esPrincipal` para reducir lecturas. Subcolección solo si se requiere versión original + thumbnails. |
-| `ESPECIFICACION` | `products/{productId}/specs/{specId}` **o** Mapa `specs: {ram: "16GB", pantalla: "15.6"}` | Mapa embebido es óptimo para specs estáticas. Subcolección solo si son dinámicas o muy extensas. |
-| `INVENTARIO` + `PROVEEDOR` | `inventory/{productId}` / `suppliers/{supplierId}` | `inventory` almacena `stockActual`, `stockMinimo`, `ubicacion`. `suppliers` es catálogo administrativo. Se vincula por `productId`/`supplierId`. |
-| `CARRITO` + `DETALLE_CARRITO` | Estado local (`Provider`) → `users/{uid}/cart/{itemId}` (solo usuarios registrados) | El carrito es volátil. Se persiste en Firestore únicamente para sincronización cross-device o recuperación de sesión. |
-| `PEDIDO` + `DETALLE_PEDIDO` | `orders/{orderId}` + subcolección `items/{itemId}` | `orders` contiene snapshot inmutable de dirección, cupón aplicado, totales y estado. `items` guarda `productId`, `cantidad`, `precioUnitarioSnapshot`. |
-| `PAGO` + `ENVIO` + `CUPON` | `orders/{orderId}/payments/{paymentId}` / `shipping/{shippingId}` / `coupons/{couponId}` | Pagos y envíos son subcolecciones del pedido. Cupones se validan en tiempo real y se guardan como referencia en el pedido. |
-| `RESENA` | `products/{productId}/reviews/{reviewId}` + `products/{productId}/reviewSummary` | Subcolección para comentarios. `reviewSummary` es documento agregado con `promedio`, `totalReseñas`, `distribucionCalificaciones` (actualizado vía Cloud Function o cliente tras validar). |
+Primary (Morado Pastel), Secondary, Background, Surface, y Success (para stock disponible).
 
-🔒 **Reglas de Seguridad Firestore (Resumen):**
-- `users/*`: Solo el propietario autenticado puede leer/escribir.
-- `products/*`: Lectura pública. Escritura restringida a roles administrativos.
-- `orders/*`: Solo el creador del pedido puede leer. Escritura solo en creación.
-- `inventory/*`, `suppliers/*`: Acceso restringido a backend/admin.
+Describe brevemente el estilo UX: bordes redondeados, elevaciones (sombras) y tipografía sugerida.
 
----
+### 4. Configuración del pubspec.yaml
+Toma como base estas dependencias y organízalas en el plan, asegurando compatibilidad para todas las plataformas mencionadas:
 
-## 📂 Arquitectura de Directorios y Patrones
-
-```text
-lib/
-├── main.dart                      # Punto de entrada, inicialización Firebase, Theme, Router
-├── config/
-│   ├── routes.dart                # go_router: rutas, redirecciones, deep links
-│   ├── theme.dart                 # ThemeData: colores pastel, tipografía, componentes base
-│   └── firebase_init.dart         # Configuración multi-flavor (dev/prod)
-├── core/
-│   ├── constants/                 # Strings, dimensiones, breakpoints
-│   ├── errors/                    # Custom exceptions, error handlers
-│   ├── utils/                     # Formatters, validators, date helpers
-│   └── widgets/                   # Reutilizables puros: PastelButton, CustomTextField, LoadingShimmer
-├── data/
-│   ├── models/                    # Clases Dart (fromJson/toJson): User, Product, Order, CartItem, Review
-│   ── dto/                       # Data Transfer Objects para payloads específicos
-├── services/
-│   ├── auth_service.dart          # Firebase Auth wrapper
-│   ├── firestore_service.dart     # Queries genéricas, paginación, batch writes
-│   ├── storage_service.dart       # Upload/download imágenes
-│   └── cart_sync_service.dart     # Sincronización carrito local ↔ Firestore
-├── providers/
-│   ├── auth_provider.dart         # Estado sesión, perfil, direcciones
-│   ├── product_provider.dart      # Catálogo, filtros, búsqueda, detalle
-│   ├── cart_provider.dart         # CRUD carrito, cálculos totales
-│   ├── order_provider.dart        # Creación, seguimiento, historial
-│   └── ui_provider.dart           # Theme, navegación, estados de carga global
-├── ui/
-│   ├── screens/
-│   │   ├── auth/                  # Login, Register, ForgotPassword
-│   │   ├── home/                  # Home, Categories, Search, Filters
-│   │   ├── product/               # Detail, Specs, Reviews, Gallery
-│   │   ├── cart/                  # Cart, Checkout, CouponInput
-│   │   ├── orders/                # OrderList, OrderDetail, Tracking
-│   │   ├── profile/               # Profile, Addresses, Security
-│   │   └── admin/                 # (Opcional) CRUD productos, inventario
-│   └── platforms/                 # Adaptaciones específicas (si es necesario)
-└── utils/
-    ├── platform_utils.dart        # Detección SO, breakpoints, navegación adaptativa
-    └── analytics_utils.dart       # Eventos Firebase Analytics
-```
-
-**Patrones Aplicados:**
-- **Provider + ChangeNotifier:** Gestión de estado predecible, sin boilerplate excesivo.
-- **Repository Pattern (ligero):** `services/` abstraen Firebase; `providers/` consumen servicios.
-- **Inmutabilidad en transacciones:** Pedidos y pagos guardan snapshots para evitar inconsistencias históricas.
-- **Navegación Adaptativa:** `go_router` con layouts diferenciados para móvil (BottomNav) y escritorio (NavigationRail/SideMenu).
-
----
-
-##  Sistema de Diseño UI/UX (Paleta Pastel Profesional)
-
-| Elemento | Color / Hex | Uso Técnico |
-|----------|-------------|-------------|
-| **Primario** | `#B8A9E8` (Morado claro) | Botones CTA, barras activas, acentos interactivos, badges destacados |
-| **Secundario** | `#A8D5E2` (Azul pastel) | Estados informativos, enlaces secundarios, fondos de secciones |
-| **Fondo Base** | `#F8F9FB` (Gris pastel frío) | Scaffold background, separación visual |
-| **Superficie** | `#FFFFFF` (Blanco) | Cards, modales, inputs, áreas de contenido |
-| **Texto Principal** | `#1E293B` (Azul grisáceo oscuro) | WCAG AA garantizado sobre fondos pastel. Títulos y cuerpo |
-| **Texto Secundario** | `#64748B` (Gris medio) | Descripciones, metadatos, placeholders |
-| **Éxito/Stock** | `#A7F3D0` (Menta pastel) | Indicadores positivos, precios oferta, confirmaciones |
-| **Alerta/Stock Bajo** | `#FED7AA` (Naranja pastel) | Advertencias, cupones por vencer, validaciones |
-
-**Directrices UI/UX:**
-- **Accesibilidad:** Contraste mínimo 4.5:1. Soporte a `MediaQuery.textScaleFactor`. Etiquetas semánticas para lectores de pantalla.
-- **Responsive:** 
-  - Móvil: `BottomNavigationBar`, grids 2 cols, full-width cards.
-  - Web/Windows: `NavigationRail` o `AppBar` extendido, grids 4-5 cols, tablas para pedidos, hover states.
-- **Feedback:** Skeleton loaders (`shimmer`), toast/snackbar pastel, empty states ilustrados, validación en tiempo real de formularios.
-- **Componentes Base:** `PastelElevatedButton`, `PastelOutlinedButton`, `ProductCard`, `SpecTable`, `ReviewRow`, `AddressSelector`.
-
----
-
-## 📦 Stack de Dependencias (`pubspec.yaml`)
-
-```yaml
+YAML
 dependencies:
   flutter:
     sdk: flutter
+  firebase_core: ^2.30.0
+  firebase_auth: ^4.17.0
+  cloud_firestore: ^4.15.0
+  provider: ^6.1.1
+  google_fonts: ^6.2.1
+### 5. Modelado de Datos (SQL a NoSQL)
+Transforma este esquema relacional a una estructura de Colecciones y Documentos de Firestore. Explica la jerarquía y cómo manejar las relaciones en un entorno NoSQL para evitar lecturas excesivas:
 
-  # Firebase & Cloud
-  firebase_core: ^latest
-  firebase_auth: ^latest
-  cloud_firestore: ^latest
-  firebase_storage: ^latest
-  firebase_analytics: ^latest
-  firebase_crashlytics: ^latest
+SQL
+-- Tablas a transformar:
+-- CLIENTE, DIRECCION, CATEGORIA, MARCA, PRODUCTO, CARRITO, 
+-- DETALLE_CARRITO, PEDIDO, DETALLE_PEDIDO, PAGO, ENVIO, RESEÑA
+- 1. CLIENTES
 
-  # Estado y Rutas
-  provider: ^latest
-  go_router: ^latest
-  flutter_hooks: ^latest          # Reduce boilerplate en widgets con estado
-  equatable: ^latest              # Comparación eficiente de modelos
+CREATE TABLE CLIENTE (
 
-  # UI y Experiencia
-  cached_network_image: ^latest
-  shimmer: ^latest
-  flutter_slidable: ^latest       # Acciones en carrito/pedidos
-  google_fonts: ^latest
-  flutter_svg: ^latest
-  intl: ^latest                   # Formatos moneda/fecha
+    cliente_id INT AUTO_INCREMENT PRIMARY KEY,
 
-  # Utilidades y Seguridad
-  uuid: ^latest                   # IDs locales/carrito
-  validators: ^latest             # Validación email/password
-  flutter_dotenv: ^latest         # Variables de entorno
-  shared_preferences: ^latest     # Cache ligero (theme, onboarding)
+    nombre     VARCHAR(100) NOT NULL,
 
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^latest
-  build_runner: ^latest
-  mockito: ^latest
+    email      VARCHAR(150) UNIQUE NOT NULL,
+
+    password   VARCHAR(255) NOT NULL,
+
+    telefono   VARCHAR(20)
+
+);
+
+
+
+-- 2. DIRECCIONES
+
+CREATE TABLE DIRECCION (
+
+    direccion_id  INT AUTO_INCREMENT PRIMARY KEY,
+
+    cliente_id    INT NOT NULL,
+
+    calle         VARCHAR(200) NOT NULL,
+
+    ciudad        VARCHAR(100) NOT NULL,
+
+    pais          VARCHAR(50) NOT NULL,
+
+    codigo_postal VARCHAR(10) NOT NULL,
+
+    FOREIGN KEY (cliente_id) REFERENCES CLIENTE(cliente_id) ON DELETE CASCADE
+
+);
+
+
+
+-- 3. CATEGORÍAS
+
+CREATE TABLE CATEGORIA (
+
+    categoria_id INT AUTO_INCREMENT PRIMARY KEY,
+
+    nombre       VARCHAR(100) NOT NULL
+
+);
+
+
+
+-- 4. MARCAS
+
+CREATE TABLE MARCA (
+
+    marca_id INT AUTO_INCREMENT PRIMARY KEY,
+
+    nombre   VARCHAR(100) NOT NULL
+
+);
+
+
+
+-- 5. PRODUCTOS (incluye stock para evitar tabla extra)
+
+CREATE TABLE PRODUCTO (
+
+    producto_id  INT AUTO_INCREMENT PRIMARY KEY,
+
+    nombre       VARCHAR(200) NOT NULL,
+
+    descripcion  TEXT,
+
+    precio       DECIMAL(10,2) NOT NULL,
+
+    stock        INT DEFAULT 0,
+
+    categoria_id INT,
+
+    marca_id     INT,
+
+    FOREIGN KEY (categoria_id) REFERENCES CATEGORIA(categoria_id) ON DELETE SET NULL,
+
+    FOREIGN KEY (marca_id)     REFERENCES MARCA(marca_id) ON DELETE SET NULL
+
+);
+
+
+
+-- 6. CARRITO
+
+CREATE TABLE CARRITO (
+
+    carrito_id INT AUTO_INCREMENT PRIMARY KEY,
+
+    cliente_id INT,
+
+    creado_en  DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (cliente_id) REFERENCES CLIENTE(cliente_id) ON DELETE CASCADE
+
+);
+
+
+
+-- 7. DETALLE CARRITO
+
+CREATE TABLE DETALLE_CARRITO (
+
+    detalle_id  INT AUTO_INCREMENT PRIMARY KEY,
+
+    carrito_id  INT NOT NULL,
+
+    producto_id INT NOT NULL,
+
+    cantidad    INT DEFAULT 1,
+
+    FOREIGN KEY (carrito_id)  REFERENCES CARRITO(carrito_id) ON DELETE CASCADE,
+
+    FOREIGN KEY (producto_id) REFERENCES PRODUCTO(producto_id) ON DELETE CASCADE
+
+);
+
+
+
+-- 8. PEDIDOS
+
+CREATE TABLE PEDIDO (
+
+    pedido_id       INT AUTO_INCREMENT PRIMARY KEY,
+
+    cliente_id      INT NOT NULL,
+
+    total           DECIMAL(10,2) NOT NULL,
+
+    estado          VARCHAR(50) DEFAULT 'pendiente',
+
+    direccion_envio TEXT NOT NULL,
+
+    fecha           DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (cliente_id) REFERENCES CLIENTE(cliente_id) ON DELETE RESTRICT
+
+);
+
+
+
+-- 9. DETALLE PEDIDO
+
+CREATE TABLE DETALLE_PEDIDO (
+
+    detalle_id  INT AUTO_INCREMENT PRIMARY KEY,
+
+    pedido_id   INT NOT NULL,
+
+    producto_id INT NOT NULL,
+
+    cantidad    INT NOT NULL,
+
+    precio      DECIMAL(10,2) NOT NULL,
+
+    FOREIGN KEY (pedido_id)   REFERENCES PEDIDO(pedido_id) ON DELETE CASCADE,
+
+    FOREIGN KEY (producto_id) REFERENCES PRODUCTO(producto_id) ON DELETE RESTRICT
+
+);
+
+
+
+-- 10. PAGOS
+
+CREATE TABLE PAGO (
+
+    pago_id   INT AUTO_INCREMENT PRIMARY KEY,
+
+    pedido_id INT NOT NULL,
+
+    metodo    VARCHAR(50) NOT NULL,
+
+    monto     DECIMAL(10,2) NOT NULL,
+
+    estado    VARCHAR(50) DEFAULT 'pendiente',
+
+    FOREIGN KEY (pedido_id) REFERENCES PEDIDO(pedido_id) ON DELETE RESTRICT
+
+);
+
+
+
+-- 11. ENVÍOS
+
+CREATE TABLE ENVIO (
+
+    envio_id     INT AUTO_INCREMENT PRIMARY KEY,
+
+    pedido_id    INT NOT NULL,
+
+    estado       VARCHAR(50) DEFAULT 'pendiente',
+
+    numero_guia  VARCHAR(100),
+
+    fecha_envio  DATETIME,
+
+    FOREIGN KEY (pedido_id) REFERENCES PEDIDO(pedido_id) ON DELETE CASCADE
+
+);
+
+
+
+-- 12. RESEÑAS
+
+CREATE TABLE RESENA (
+
+    resena_id    INT AUTO_INCREMENT PRIMARY KEY,
+
+    producto_id  INT NOT NULL,
+
+    cliente_id   INT NOT NULL,
+
+    calificacion INT NOT NULL,
+
+    comentario   TEXT,
+
+    fecha        DATETIME DEFAULT
+
+### 6. Plan de Ejecución Paso a Paso
+No entregues código de funciones. Entrega una hoja de ruta técnica dividida en:
+
+Configuración inicial de Firebase y Flutter.
+
+Arquitectura de Modelos y Servicios.
+
+Implementación de la lógica de negocio (Auth y Carrito) con Provider.
+
+## Resultado:
+# 📘 Plan de Implementación: Proyecto PChop
+**Arquitectura:** Flutter + Firebase (Firestore/Auth) + Provider  
+**Alcance:** Multiplataforma (Android, iOS, Web, Windows)  
+**Restricción Crítica:** 🔒 Cero telemetría/Google Analytics en todo el ciclo de vida.
+
+---
+
+## 1. 📂 Estructura de Archivos y Organización
+
+### 🗂️ Organización dentro de `lib/`
+Se adopta una arquitectura **Feature-Driven con capas de separación de responsabilidades**, optimizada para `Provider` y escalabilidad futura.
+
+```
+lib/
+├── core/
+│   ├── constants/          # Rutas, strings, breakpoints, límites de stock
+│   ├── theme/              # ThemeData, paleta pastel, tipografía, estilos base
+│   ├── utils/              # Helpers (formateo de moneda, validadores, fechas)
+│   └── errors/             # Custom Exceptions & Failure clases
+├── data/
+│   ├── models/             # Entidades puras (User, Product, Order, Cart, etc.)
+│   ├── repositories/       # Interfaces de acceso a datos (Firestore)
+│   └── services/           # Lógica de Firebase Auth, Firestore queries, offline cache
+├── features/
+│   ├── auth/               # Login, Register, Password Reset, State Notifiers
+│   ├── catalog/            # Listado, detalles, filtros, búsqueda
+│   ├── cart/               # Gestión de carrito, sincronización en tiempo real
+│   ├── checkout/           # Flujo de pedido, resumen, confirmación
+│   └── profile/            # Direcciones, historial de pedidos, reseñas
+├── providers/              # Global & Scoped ChangeNotifiers (Auth, Theme, Cart)
+├── ui/
+│   ├── shared/             # Widgets reutilizables (buttons, cards, dialogs, loaders)
+│   └── screens/            # Vistas principales por flujo de usuario
+└── main.dart               # Entry point, inicialización segura, routing
 ```
 
----
+### 🛠️ Contenido de la carpeta `bin/`
+Esta carpeta aloja **scripts Dart CLI** para tareas administrativas, precarga de datos y mantenimiento de base de datos. Se ejecutan fuera del ciclo de la app mediante `dart run bin/<script>.dart`.
 
-## 📋 Procedimiento Técnico Paso a Paso
+| Script | Propósito |
+|--------|-----------|
+| `seed_initial_data.dart` | Carga masiva de `CATEGORÍA`, `MARCA` y `PRODUCTO` inicial desde JSON/CSV local. |
+| `reset_test_environment.dart` | Limpia colecciones de prueba en modo sandbox para QA/Dev. |
+| `sync_inventory.dart` | Script de ajuste manual de stock por lote (ej. tras recepción física). |
+| `export_orders.dart` | Exporta pedidos a CSV para conciliación contable o logística. |
 
-1. **Inicialización Multiplataforma y Configuración Base**
-   - Crear proyecto Flutter con soporte `android`, `ios`, `web`, `windows`.
-   - Configurar `pubspec.yaml`, `flutter_launcher_icons`, y assets.
-   - Establecer `.gitignore`, `.env` para variables de entorno, y estructura de carpetas definida.
-   - Configurar `go_router` con shell routes y placeholders para validación de navegación.
-
-2. **Integración de Firebase y Reglas de Seguridad**
-   - Ejecutar `flutterfire configure` para generar `firebase_options.dart` multiplataforma.
-   - Inicializar `FirebaseCore`, `FirebaseAuth`, `Firestore`, `Storage` en `main.dart`.
-   - Redactar e implementar reglas de seguridad en Firestore alineadas al mapeo NoSQL.
-   - Habilitar Auth (Email/Password) y configurar verificación por email (opcional).
-
-3. **Sistema de Diseño y Tema Base**
-   - Implementar `ThemeData` con paleta pastel, tipografía, radios, elevaciones y estados de botones.
-   - Crear widgets base reutilizables (`PastelButton`, `CustomTextField`, `LoadingShimmer`, `EmptyState`).
-   - Configurar `MediaQuery` breakpoints y adaptadores de layout (`LayoutBuilder`, `Platform.isDesktop`).
-
-4. **Autenticación y Gestión de Perfiles**
-   - Desarrollar `AuthService` (login, register, logout, resetPassword, stream de usuario).
-   - Implementar `AuthProvider` con `ChangeNotifier` para estado global de sesión.
-   - Crear pantallas de Login/Registro con validación en tiempo real y manejo de errores Firebase.
-   - Sincronizar `users/{uid}` tras registro y desarrollar CRUD de `addresses` subcolección.
-
-5. **Catálogo de Productos y Búsquedas**
-   - Modelar clases Dart (`Product`, `Category`, `Brand`, `Review`) con `fromJson/toJson`.
-   - Implementar `ProductService` con queries paginadas (`startAfterDocument`), filtros por categoría/marca/precio, y búsqueda por texto.
-   - Desarrollar `ProductProvider` para estado del catálogo, loading, error y empty.
-   - Construir `HomeScreen` con grid adaptable, filtros laterales (desktop) / drawer (mobile), y skeleton loaders.
-   - Implementar `ProductDetailScreen` con galería, specs embebidas, y botón de acción.
-
-6. **Carrito de Compras y Checkout**
-   - Crear `CartItem` model y `CartProvider` con lógica local (add, remove, updateQty, clear, total).
-   - Sincronizar carrito con Firestore solo para usuarios registrados (`users/{uid}/cart`).
-   - Desarrollar `CartScreen` con lista editable, resumen y validación de stock.
-   - Implementar flujo de checkout: selección de dirección, aplicación de cupón (`coupons/{couponId}`), cálculo de impuestos/descuentos, y creación de `orders/{orderId}` con snapshot inmutable.
-
-7. **Gestión de Pedidos, Pagos y Envíos**
-   - Crear `OrderProvider` para historial y detalle.
-   - Implementar `OrderDetailScreen` con línea de tiempo de estado (`pendiente`, `pagado`, `enviado`, `entregado`, `cancelado`).
-   - Modelar subcolecciones `payments` y `shipping` dentro del pedido.
-   - Simular integración de pasarela (placeholder para Stripe/MercadoPago) con `referenciaExterna` y estado de pago.
-
-8. **Reseñas, Calificaciones y Postventa**
-   - Desarrollar `ReviewService` con validación de compra verificada (`pedido_id` vinculado).
-   - Implementar formulario de reseña con estrellas, título y comentario.
-   - Actualizar `reviewSummary` (promedio y conteo) tras aprobación/moderación.
-   - Mostrar reseñas en detalle de producto con paginación y filtros por calificación.
-
-9. **Adaptación Responsive y Optimización Multiplataforma**
-   - Ajustar navegación: `BottomNavigationBar` (móvil) → `NavigationRail`/`SideMenu` (web/windows).
-   - Optimizar grids: 2 cols (mobile) → 4-5 cols (desktop).
-   - Implementar `DataTable` o `ListView` avanzado para historial de pedidos en escritorio.
-   - Asegurar compatibilidad de rutas, deep links y manejo de teclado en Web/Windows.
-   - Reducir rebuilds: `const`, `Consumer` selectivo, `Selector` en Provider, imágenes cacheadas.
-
-10. **Testing, Analítica y Despliegue**
-    - Unit tests para providers, servicios y modelos (`mockito`).
-    - Widget tests para componentes críticos y flujos de navegación.
-    - Integrar `FirebaseAnalytics` para eventos: `view_item`, `add_to_cart`, `begin_checkout`, `purchase`.
-    - Configurar `Crashlytics` y manejo global de errores.
-    - Builds: `flutter build apk/appbundle`, `ipa`, `web`, `windows`.
-    - Despliegue Web en Firebase Hosting. Configuración de signing y publicación en stores (opcional).
+> ✅ **Nota de arquitectura:** Los scripts utilizan el SDK de Firebase Admin o `firebase/firestore` en modo CLI. Nunca se ejecutan en el cliente ni contienen claves expuestas.
 
 ---
 
-## ✅ Criterios de Calidad y Validación
+## 2. 🎨 Diseño Visual (Estética Pastel)
 
-| Área | Criterio de Aceptación |
-|------|------------------------|
-| **Arquitectura** | Separación clara UI/Estado/Servicios. Provider sin ciclos de notificación. |
-| **Base de Datos** | Consultas paginadas, índices compuestos declarados, snapshots inmutables en transacciones. |
-| **UI/UX** | Paleta pastel consistente, contraste WCAG AA, layouts adaptativos por plataforma, feedback visual en todos los estados. |
-| **Rendimiento** | < 2s carga inicial catálogo, rebuilds mínimos, imágenes cacheadas, queries optimizadas. |
-| **Seguridad** | Reglas Firestore estrictas, validación de entrada, manejo seguro de tokens, sin datos sensibles en logs. |
-| **Multiplataforma** | Navegación y layouts adaptados, compilación exitosa en las 4 plataformas, deep links funcionales. |
+### 🎨 Paleta de Colores (HEX)
+
+| Rol de Color | Código HEX | Uso en UI |
+|--------------|------------|-----------|
+| **Primary** | `#C4A1E4` | Botones principales, iconos activos, encabezados, acentos de marca |
+| **Secondary** | `#A8D8EA` | Elementos complementarios, badges, hover states, separadores |
+| **Background** | `#F9F7FC` | Fondo global de pantallas, canvas principal |
+| **Surface** | `#FFFFFF` | Tarjetas (`Cards`), diálogos, inputs, áreas de contenido |
+| **Success** | `#A8E6CF` | Indicadores de stock disponible, confirmaciones, estados positivos |
+
+### 🖌️ Directrices UX/UI
+- **Bordes Redondeados:** `16px` para tarjetas y contenedores, `12px` para botones e inputs, `24px` para diálogos modales.
+- **Elevaciones y Sombras:** Sombras difusas de baja opacidad para mantener la suavidad pastel. Ej: `BoxShadow(color: #0000001A, blurRadius: 12, offset: Offset(0, 4))`.
+- **Tipografía Sugerida:** `Quicksand` o `Nunito` (vía `google_fonts`). Peso regular `400` para cuerpo, `600` para subtítulos, `700` para títulos y CTAs. Alto contraste texto-fondo garantizado.
+- **Espaciado:** Grid base de `8px`. Márgenes internos generosos para respiración visual.
 
 ---
 
-## 🚀 Siguiente Hito
-El plan técnico está consolidado. El siguiente paso es la **generación estructurada de código**, comenzando por:
-1. Configuración inicial, `pubspec.yaml`, estructura de carpetas y `ThemeData` pastel.
-2. Inicialización Firebase + `go_router` + widgets base.
-3. `AuthProvider` + pantallas de autenticación.
+## 3. 📦 Configuración del `pubspec.yaml`
 
-¿Confirmas que procedamos con la **Fase 1 de implementación (código base + tema + estructura)** o deseas ajustar algún modelo de datos, dependencia o flujo antes de generar los archivos?
+```yaml
+name: pchop
+description: Tienda de electrónicos multiplataforma sin telemetría.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+  flutter: '>=3.16.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^2.30.0
+  firebase_auth: ^4.17.0
+  cloud_firestore: ^4.15.0
+  provider: ^6.1.1
+  google_fonts: ^6.2.1
+  flutter_lints: ^4.0.0      # Buenas prácticas obligatorias
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Quicksand
+      fonts:
+        - asset: assets/fonts/Quicksand-Regular.ttf
+        - asset: assets/fonts/Quicksand-Bold.ttf
+```
+
+### ⚙️ Compatibilidad Multiplataforma
+- **Android/iOS:** Configuración nativa vía `flutterfire configure`.
+- **Web:** Habilitar Firestore/Auth en Firebase Console para dominios web. Configurar `web/index.html` con `defer` en scripts si es necesario.
+- **Windows:** Firebase Auth requiere fallback a `OAuth` o `Email/Password` puro. Se desactivan dependencias nativas no soportadas en desktop.
+- 🔒 **Telemetría:** No se incluye `firebase_analytics`. En la consola de Firebase, se desactiva `Automatic Data Collection` y se eliminan todos los `integrations` de BigQuery/Analytics.
+
+---
+
+## 4. 🗃️ Modelado de Datos (SQL → NoSQL)
+
+### 🔄 Estrategia de Transformación
+En Firestore se prioriza la **desnormalización controlada**, el **incrustado (embedding)** de subconjuntos frecuentes y las **referencias suaves** para evitar `JOINs` costosos y lecturas excesivas.
+
+| Colección Firestore | Origen SQL | Estructura del Documento (Ejemplo) |
+|---------------------|------------|-----------------------------------|
+| `users/{uid}` | `CLIENTE` | `{uid, nombre, email, telefono, rol, createdAt}` |
+| `users/{uid}/addresses/{addrId}` | `DIRECCION` | `{calle, ciudad, pais, cp, isDefault}` |
+| `categories/{catId}` | `CATEGORIA` | `{nombre, slug, iconUrl}` |
+| `brands/{brandId}` | `MARCA` | `{nombre, logoUrl, website}` |
+| `products/{prodId}` | `PRODUCTO` | `{nombre, descripcion, precio, stock, categoriaNombre, marcaNombre, imagenes[], avgRating, reviewCount}` |
+| `carts/{cartId}` o `users/{uid}/cart` | `CARRITO` + `DETALLE_CARRITO` | `{userId, createdAt, items: [{prodId, nombreSnapshot, precioSnapshot, cantidad}], total}` |
+| `orders/{orderId}` | `PEDIDO` + `DETALLE_PEDIDO` + `PAGO` + `ENVIO` | `{userId, total, estado, fecha, direccionEnvioObj, items: [{prodId, nombre, precioUnitario, cantidad}], pago: {metodo, estado}, envio: {estado, guia, fecha}}` |
+| `products/{prodId}/reviews/{revId}` | `RESENA` | `{userId, nombreCliente, calificacion, comentario, createdAt}` |
+
+### 🧠 Manejo de Relaciones en NoSQL
+1. **Embedding en `orders`:** `DETALLE_PEDIDO`, `PAGO` y `ENVIO` se incrustan directamente en el documento `orders`. Esto garantiza **1 lectura = historial completo** sin subqueries.
+2. **Snapshots en `carts`/`orders`:** Se guarda `nombreSnapshot` y `precioSnapshot` al añadir al carrito/pedir. Evita inconsistencias si el producto cambia de precio o se elimina después.
+3. **Subcolecciones para `addresses` y `reviews`:** Permiten escalar independientemente del usuario/producto y facilitan paginación (`limit`, `startAfter`).
+4. **Denormalización ligera en `products`:** Se almacenan `categoriaNombre` y `marcaNombre` directamente. Las colecciones `categories` y `brands` se usan solo para filtros globales o gestión administrativa, no para renderizado de catálogos.
+5. **Índices Compuestos:** Se crearán en Firebase Console para consultas frecuentes: `products` por `stock > 0` + `categoriaNombre`, `orders` por `userId` + `createdAt DESC`.
+
+---
+
+## 5. 🗺️ Plan de Ejecución Paso a Paso
+
+### 🔹 Fase 1: Configuración Inicial de Firebase y Flutter
+- [ ] Inicializar proyecto Flutter con soporte para `android`, `ios`, `web`, `windows`.
+- [ ] Ejecutar `flutterfire configure` y descargar `firebase_options.dart`.
+- [ ] Configurar `FirebaseApp` en `main()` con manejo de errores seguro.
+- [ ] **Auditoría de Telemetría:** Verificar `pubspec.yaml`, desactivar recolección automática en Firebase Console, eliminar cualquier referencia a `FirebaseAnalytics`.
+- [ ] Configurar reglas iniciales de Firestore (`firestore.rules`) para modo de prueba (lectura/escritura limitada a usuarios autenticados).
+
+### 🔹 Fase 2: Arquitectura de Modelos y Servicios
+- [ ] Definir entidades (`User`, `Product`, `Order`, `CartItem`) con métodos `fromJson`/`toJson`.
+- [ ] Crear capa `data/services/`: `AuthService`, `FirestoreService` (CRUD genérico con tipado fuerte).
+- [ ] Implementar `data/repositories/`: Abstracciones `IAuthRepository`, `IProductRepository`, `ICartRepository`.
+- [ ] Configurar gestión de estado global: `AppProvider`, `AuthProvider`, `CartProvider` usando `ChangeNotifier` y `ChangeNotifierProvider`.
+
+### 🔹 Fase 3: Lógica de Negocio (Auth y Carrito) con Provider
+- [ ] **Auth Flow:** Registro/Login por email/password. Manejo de estados `loading`, `authenticated`, `error`. Persistencia de sesión vía Firebase Auth.
+- [ ] **Carrito Sincrónico:** `CartProvider` maneja `addItem`, `removeItem`, `updateQuantity`, `clearCart`. Sincronización opcional con Firestore para persistencia cross-device.
+- [ ] **Validaciones de Stock:** Verificación en tiempo real antes de checkout. Rechazo si `cantidad > stock`.
+- [ ] **Manejo de Errores:** Centralizado en `core/errors`. Notificaciones `SnackBar`/`Dialog` amigables con paleta pastel.
+
+### 🔹 Fase 4: Desarrollo de UI Adaptable (Responsive)
+- [ ] Implementar `ThemeData` con la paleta pastel y tipografía definida.
+- [ ] Usar `LayoutBuilder`, `MediaQuery`, y `ResponsiveGrid` para breakpoints:
+  - `Mobile`: `width < 600` (Single column, bottom nav)
+  - `Tablet/Desktop`: `width >= 600` (Sidebar/Grid 3-4 cols, top nav)
+- [ ] Construir pantallas base: `LoginScreen`, `CatalogScreen`, `ProductDetailScreen`, `CartScreen`, `CheckoutScreen`, `OrderHistoryScreen`.
+- [ ] Optimizar Web/Desktop: Hover states, teclado accesible, scrollbars personalizados, carga lazy de imágenes (`FadeInImage` + `CachedNetworkImage`).
+
+### 🔹 Fase 5: Pruebas y Despliegue Final
+- [ ] **Unit Tests:** Lógica de carrito, cálculo de totales, validación de modelos.
+- [ ] **Widget Tests:** Navegación, estados de Provider, responsividad básica.
+- [ ] **Integración Firebase:** Verificar reglas de seguridad, límites de lectura/escritura, fallback offline.
+- [ ] **Builds:** `flutter build apk/appbundle` (Android), `flutter build ipa` (iOS), `flutter build web --release` (Web), `flutter build windows --release` (Windows).
+- [ ] **Despliegue:** 
+  - Web: Firebase Hosting o Vercel.
+  - Android/iOS: Play Console / App Store Connect.
+  - Windows: MSIX o ejecutable standalone.
+- [ ] **Entrega Final:** Documentación de despliegue, credenciales seguras (no hardcodeadas), y reporte de auditoría de privacidad (cero telemetría verificada).
+
+---
+
+## ⚠️ Notas Críticas de Cumplimiento
+1. 🔒 **Prohibición de Telemetría:** Se auditó que ningún paquete transitorio inyecta `firebase_analytics`, `crashlytics` o `performance`. Se recomienda bloquear tráfico no esencial a nivel de red en entornos sensibles si se requiere cumplimiento GDPR estricto.
+2. 🌐 **Web/Desktop Firebase:** Web requiere habilitar `CORS` si se usa hosting externo. Windows/Desktop no soporta `signInWithPopup` nativo; se prioriza `Email/Password` + `linkWithCredential` para flujo seguro.
+3. 📉 **Optimización de Costos Firestore:** El modelado incrustado en `orders` reduce lecturas en historial en ~70%. Se recomienda activar `enablePersistence()` solo en Web/Desktop bajo supervisión de RAM.
+4. 🛡️ **Reglas de Seguridad:** Nunca confiar en validación solo cliente. Firestore debe verificar: `request.auth.uid == resource.data.userId` en escrituras sensibles y validar `stock >= 0` en transacciones.
+
+> ✅ Este plan garantiza una base escalable, mantenible y estrictamente alineada con las restricciones técnicas y de privacidad solicitadas.
+Desarrollo de la UI adaptable (Responsive).
+
+Pruebas y despliegue final.
+
+Formato de salida: Markdown limpio, profesional, con tablas, negritas y listas para facilitar la lectura.
